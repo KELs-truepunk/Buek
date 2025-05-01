@@ -62,7 +62,7 @@ float muddySensor() {
   float voltage = muddyValue * (VREF / 4095.0);   //Voltagee
   float ntu = voltage * 1000;                     //NTU
   //вывод NTU
-  printf("NTU: %0.f | Voltage: %2.fV",ntu,voltage);
+  printf("NTU: %0.f | Voltage: %2.fV\n",ntu,voltage);
   return ntu;//зачем я так сделал ведь все равно через глобальные переменные делаю, и я знаю что есть указатели
 }
 
@@ -90,7 +90,7 @@ void tdsSensor() {
       // считаем TDS
     tdsValue = (133.42*pow(compensationVoltage,3) + 255.86*pow(compensationVoltage,2) + 857.39*compensationVoltage) * K_VALUE;
     //вывод ppm
-    printf("TDS: %0.f ppm | Voltage: %2.fV",tdsValue,voltage);
+    printf("TDS: %0.f ppm | Voltage: %2.fV\n",tdsValue,voltage);
   }
 }
 //Подключение к Интернету
