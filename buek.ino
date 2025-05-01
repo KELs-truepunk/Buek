@@ -13,7 +13,7 @@
 float muddyValue = 0;         // значение мутности
 int analogBuffer[SCOUNT];     //буфер для усреднения значений ppm
 int analogBufferIndex = 0;
-float averageVoltage = 0;
+float voltage = 0;
 float tdsValue = 0;           //значения ppm
 
 //данные для  Wi-Fi
@@ -32,9 +32,9 @@ PubSubClient client(wclient);
 void setup() {
   Serial.begin(9600);
   pinMode(muddy, INPUT);
-  Serial.Println("Muddy OK!!!");
+  Serial.println("Muddy OK!!!");
   pinMode(TDS_PIN, INPUT);
-  Serial.Println("TDS OK!!!");
+  Serial.println("TDS OK!!!");
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
 }
@@ -70,7 +70,7 @@ void tdsSensor() {
   static unsigned long Timepoint = millis();//получаем кол-во миллисекунд с момента начала выполнения
   static unsigned long printTimepoint = millis();
   // Каждые 40 мс считываем значение с датчика
-  if(millis() Timepoint > 40) {
+  if(millis() - Timepoint > 40) {
     Timepoint = millis();
     analogBuffer[analogBufferIndex] = analogRead(TDS_PIN);
     analogBufferIndex = (analogBufferIndex + 1) % SCOUNT;//двигаемся вперед по буферу
@@ -90,7 +90,7 @@ void tdsSensor() {
       // считаем TDS
     tdsValue = (133.42*pow(compensationVoltage,3) + 255.86*pow(compensationVoltage,2) + 857.39*compensationVoltage) * K_VALUE;
     //вывод ppm
-    printf("TDS: %0.f ppm | Voltage: %2.fV",tdsValue,voltage)
+    printf("TDS: %0.f ppm | Voltage: %2.fV",tdsValue,voltage);
   }
 }
 //Подключение к Интернету
@@ -134,7 +134,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print(topic);
   Serial.print("]: ");
   Serial.println(message);
-// проверяем из нужного ли нам топика пришли данные
+
   if(String(topic) == "buek/message" && String(message) == "45") {
     //оброботка сообщений в топике
   }
