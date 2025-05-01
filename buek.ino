@@ -1,141 +1,179 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 
-// Датчики
-#define muddy 15             // D15 на esp32
-#define TDS_PIN 13           // D13
-#define VREF 3.3             // Напряжение питания ESP32
-#define SCOUNT 30            // кол-во усредняемых значений
-#define TEMPERATURE 25.0     // Температура по умолчани
-#define K_VALUE 1.0          // коэфицент для калибровки tds
+// Конфигурация датчиков
+#define muddy 15            //D15
+#define TDS_PIN 13          //D13
+#define VREF 3.3            //напряжение
+#define SCOUNT 30           
+#define TEMPERATURE 25.0    //температура воды
+#define K_VALUE 1.0
 
 // Глобальные переменные
-float muddyValue = 0;         // значение мутности
-int analogBuffer[SCOUNT];     //буфер для усреднения значений ppm
+float ntu = 0;                  // Значение мутности
+float tdsValue = 0;             // Значение TDS
+int analogBuffer[SCOUNT];       // Буфер для усреднения
 int analogBufferIndex = 0;
-float voltage = 0;
-float tdsValue = 0;           //значения ppm
 
-//данные для  Wi-Fi
+// Настройки сети
 const char *ssid = "DECO222";
 const char *pass = "66065401!";
 
-// данные для MQTT
+// Настройки MQTT
 const char *mqtt_server = "m7.wqtt.ru";
 const int mqtt_port = 15128;
 const char *mqtt_user = "u_QPTT9R";
 const char *mqtt_pass = "fAhauOpC";
-//инициализация
+
 WiFiClient wclient;
 PubSubClient client(wclient);
 
 void setup() {
   Serial.begin(9600);
   pinMode(muddy, INPUT);
-  Serial.println("Muddy OK!!!");
+  Serial.println("Muddy OK!!");
   pinMode(TDS_PIN, INPUT);
   Serial.println("TDS OK!!!");
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
+  
 }
-//чистый луп это круто
+
 void loop() {
-  wifiConnect();
-  if (WiFi.status() == WL_CONNECTED) {
-    mqttConnect();
-    
-    float ntu = muddySensor();
-    tdsSensor();
-    
-    if(client.connected()) {
-      client.publish("buek/sensors/muddy", String(ntu).c_str());
-      client.publish("buek/sensors/tds", String(tdsValue).c_str());
-    }
-    
-    client.loop();
+  if (!wifiConnect()) {
+    delay(1000); //если не смогли подключиться 
+    return;
   }
-  delay(1000);
+  
+  if (!mqttConnect()) {
+    delay(1000);//если не смогли подключиться 
+    return;
+  }
+  
+  readSensors();            //считываем
+  printSensors();        //выводим
+  publishSensors();          //отправляем
+  
+  client.loop();
+  delay(2000); // Интервал отправки данных
 }
 
-float muddySensor() {
-  muddyValue = analogRead(muddy);                 //RAW
-  float voltage = muddyValue * (VREF / 4095.0);   //Voltagee
-  float ntu = voltage * 1000;                     //NTU
-  //вывод NTU
-  printf("NTU: %0.f | Voltage: %2.fV\n",ntu,voltage);
-  return ntu;//зачем я так сделал ведь все равно через глобальные переменные делаю, и я знаю что есть указатели
+void readSensors() {
+  readMuddySensor();//читаем мутность
+  readTDSSensor();//читаем проводимость
 }
 
-void tdsSensor() {
-  static unsigned long Timepoint = millis();//получаем кол-во миллисекунд с момента начала выполнения
-  static unsigned long printTimepoint = millis();
-  // Каждые 40 мс считываем значение с датчика
-  if(millis() - Timepoint > 40) {
-    Timepoint = millis();
-    analogBuffer[analogBufferIndex] = analogRead(TDS_PIN);
-    analogBufferIndex = (analogBufferIndex + 1) % SCOUNT;//двигаемся вперед по буферу
+void readMuddySensor() {
+  int raw = analogRead(muddy);            //считываем с датчика
+  float voltage = raw * (VREF / 4095.0);  //считаем напряжение 
+  ntu = voltage * 1000;                   //присвоить к глобальной переменной
+}
+
+void readTDSSensor() {
+  //TDS я устал писать, слишком сложно
+  static unsigned long lastSample = 0;
+  static unsigned long lastPrint = 0;
+  int raw = analogRead(TDS_PIN);
+  //каждые 40 мс считываем данные
+  if(millis() - lastSample > 40) {
+    lastSample = millis();
+    analogBuffer[analogBufferIndex] = raw;
+    analogBufferIndex = (analogBufferIndex + 1) % SCOUNT; //двигаемся вперед по буферу 
   }
- // Каждые 500 мс вычисляем и выводим значения
-  if(millis() - printTimepoint > 500) {
-    printTimepoint = millis();
+  //каждые 500 мс выводим
+  if(millis() - lastPrint > 500) {
+    lastPrint = millis();
     
-    voltage = 0;
-    // находим средние значения для вывода
+    float avgVoltage = 0;
     for(int i = 0; i < SCOUNT; i++) {
-      voltage += analogBuffer[i] * VREF / 4095.0;
+      avgVoltage += analogBuffer[i] * VREF / 4095.0;
     }
-    voltage /= SCOUNT;
-    // вычетаем температуру
-    float compensationVoltage = voltage / (1.0 + 0.02*(TEMPERATURE-25.0));
-      // считаем TDS
-    tdsValue = (133.42*pow(compensationVoltage,3) + 255.86*pow(compensationVoltage,2) + 857.39*compensationVoltage) * K_VALUE;
-    //вывод ppm
-    printf("TDS: %0.f ppm | Voltage: %2.fV\n",tdsValue,voltage);
+    avgVoltage /= SCOUNT;
+
+    float compensation = avgVoltage / (1.0 + 0.02*(TEMPERATURE-25.0));
+    tdsValue = (133.42 * pow(compensation,3) + 
+               255.86 * pow(compensation,2) + 
+               857.39 * compensation) * K_VALUE;
   }
 }
-//Подключение к Интернету
-void wifiConnect() {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.print("Подключение к ");
-    Serial.println(ssid);
-    WiFi.begin(ssid, pass);
-    
-    while (WiFi.status() != WL_CONNECTED) {
-      delay(500);
-      Serial.print(".");
-    }
-    
-    Serial.println("WiFi connected");
-    Serial.print("Ваш IP: ");//потому что могу
-    Serial.println(WiFi.localIP());
-  }
+//вывод всего (модульная конструкция, будб ты не ладна)
+void printSensors() {
+  Serial.print("NTU: ");
+  Serial.print(ntu);
+  Serial.print(" | TDS: ");
+  Serial.print(tdsValue);
+  Serial.println(" ppm");
 }
-//подключение к MQTT
-void mqttConnect() {
-  if (!client.connected()) {
-    Serial.print("Подключение к MQTT...");
+//отправляем в mqtt
+void publishSensors() {
+  if(client.connected()) {
+    char payload[20];
     
-    if (client.connect("Buek", mqtt_user, mqtt_pass)) {
-      Serial.println("OK");
-      client.subscribe("buek/sensor");
+    // Отправка данных мутности
+    dtostrf(ntu, 5, 2, payload);
+    if(client.publish("buek/sensors/muddy", payload)) {
+      Serial.println("NTU отправлено");
     } else {
-      Serial.print("Ошибка, rc=");
-      Serial.println(client.state());
+      Serial.println("Ошибка отправки NTU");
+    }
+    
+    // Отправка данных TDS
+    dtostrf(tdsValue, 5, 2, payload);
+    if(client.publish("buek/sensors/tds", payload)) {
+      Serial.println("TDS отправлено");
+    } else {
+      Serial.println("Ошибка отправки TDS");
     }
   }
 }
-//обработка всех сообщений
+//подключаем инет
+bool wifiConnect() {
+  if (WiFi.status() == WL_CONNECTED) return true;//ну а вдруг
+  
+  Serial.print("Подключение к ");
+  Serial.println(ssid);
+  WiFi.begin(ssid, pass);
+  
+  unsigned long start = millis();
+  //выводим а4нимацию из точек если долго подключаемся(......)
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
+    delay(500);
+    Serial.print(".");
+  }
+  
+  if(WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi подключен");
+    Serial.print("IP: ");
+    Serial.println(WiFi.localIP());//потому что могу
+    return true;
+  } else {
+    Serial.println("\nОшибка подключения WiFi!");
+    return false;
+  }
+}
+//подключаемся к mqtt
+bool mqttConnect() {
+  if(client.connected()) return true;//ну а вдруг
+  
+  Serial.print("Подключение к MQTT...");
+  if(client.connect("Buek", mqtt_user, mqtt_pass)) {
+    Serial.println("OK");
+    return true;
+  } else {
+    Serial.print("Ошибка: ");
+    Serial.println(client.state());
+    return false;
+  }
+}
+//нагло украденая функция,тк от скуда не подошла
 void callback(char* topic, byte* payload, unsigned int length) {
+  // Обработка входящих 
   char message[length + 1];
   memcpy(message, payload, length);
   message[length] = '\0';
-  //вывод приходящих сообщений
-  Serial.print("Message [");
+  
+  Serial.print("Получено сообщение [");
   Serial.print(topic);
   Serial.print("]: ");
   Serial.println(message);
-
-  if(String(topic) == "buek/message" && String(message) == "45") {
-    //оброботка сообщений в топике
-  }
 }
