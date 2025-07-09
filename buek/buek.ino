@@ -16,14 +16,14 @@ int analogBuffer[SCOUNT];       // Буфер для усреднения
 int analogBufferIndex = 0;
 
 // Настройки сети
-const char *ssid = "DECO222";
-const char *pass = "66065401!";
+const char *ssid = "";
+const char *pass = "";
 
 // Настройки MQTT
-const char *mqtt_server = "m7.wqtt.ru";
-const int mqtt_port = 15128;
-const char *mqtt_user = "u_QPTT9R";
-const char *mqtt_pass = "fAhauOpC";
+const char *mqtt_server = "";
+const int mqtt_port =       ;
+const char *mqtt_user =   "";
+const char *mqtt_pass =   "";
 
 WiFiClient wclient;
 PubSubClient client(wclient);
